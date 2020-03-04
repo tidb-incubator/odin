@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -52,13 +53,10 @@ var (
 )
 
 func main() {
+	start := time.Now()
 	flag.Parse()
-	actualFlags := make(map[string]bool)
-	flag.Visit(func(f *flag.Flag) {
-		actualFlags[f.Name] = true
-	})
-	if actualFlags[nmCSV] || actualFlags[nmRestore] {
-		actualFlags[nmAll] = false
+	if *csv || *restore {
+		*all = false
 	}
 
 	lightningIPs, dataDirs, err := getLightningIPsAndDataDirs()
@@ -67,10 +65,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if actualFlags[nmAll] || actualFlags[nmCSV] {
+	var start2 time.Time
+	if *all || *csv {
 		if err = fetchTpccRepoAndEnforceConf(*tidbIP, *tidbPort, *warehouse, dataDirs, lightningIPs); err != nil {
 			os.Exit(1)
 		}
+		start2 = time.Now()
 		if err = genSchema(*tidbIP, *tidbPort, lightningIPs[0]); err != nil {
 			os.Exit(1)
 		}
@@ -78,17 +78,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	fmt.Println("prepare cost:", time.Since(start).String(), "gen data cost:", time.Since(start2).String())
 
 	if len(*importerIP) == 0 {
 		fmt.Println("missing importerIP")
 		os.Exit(1)
 	}
 	importerIPs := strings.Split(*importerIP, ",")
+	if len(importerIPs) != len(lightningIPs) {
+		fmt.Println("the count of importerIP mismatch the count of lightningIP")
+		os.Exit(1)
+	}
 	if len(*deployDir) == 0 {
 		fmt.Println("missing deployDir")
 		os.Exit(1)
 	}
-	if actualFlags[nmAll] || actualFlags[nmRestore] {
+	if *all || *restore {
 		if strings.LastIndex(*deployDir, "/") == len(*deployDir)-1 {
 			*deployDir = string([]byte(*deployDir)[0 : len(*deployDir)-1])
 		}
@@ -244,7 +249,6 @@ func genSchema(tidbIP, tidbPort string, lightningIP string) (err error) {
 func genCSV(lightningIPs []string, lightningDirs []string) (err error) {
 	errCh := make(chan error, 3)
 	wg := &sync.WaitGroup{}
-	fmt.Println("genCSV start")
 	for i, lightningIP := range lightningIPs {
 		ip := lightningIP
 		dir := lightningDirs[i]
@@ -279,28 +283,43 @@ func genCSV(lightningIPs []string, lightningDirs []string) (err error) {
 
 // use ssh to start importers and lightnings.
 func restoreData(importerIPs []string, lightningIPs []string, deployDir string) (err error) {
-	errCh := make(chan error, len(lightningIPs)+len(importerIPs))
 	fmt.Println("#============\nstart tikv-importer\n#============")
+	importerSet := make(map[string]struct{})
 	for _, importerIP := range importerIPs {
+		importerSet[importerIP] = struct{}{}
+		if _, _, err = runCmd("ssh", importerIP, fmt.Sprintf(`sh %s`, deployDir+"/scripts/stop_importer.sh")); err != nil {
+			return
+		}
 		if _, _, err = runCmd("ssh", importerIP, fmt.Sprintf(`sh %s`, deployDir+"/scripts/start_importer.sh")); err != nil {
-			errCh <- err
 			return
 		}
 		fmt.Println(importerIP, "ok")
 	}
 	fmt.Println("#============\nstart tidb-lightning\n#============")
-	for i := range lightningIPs {
-		lightningIP := lightningIPs[i]
+	for _, lightningIP := range lightningIPs {
 		var stdOutMsg []byte
 		configStrictFormat := `s/^no-schema = \(\s\|\S\)\+$/no-schema = true\nstrict-format = true/;`
-		if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("grep 'strict-format' %s", deployDir+"/conf/tidb-lightning.toml")); err != nil {
-			errCh <- err
+		if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf(`grep 'strict-format' %s | wc -l`, deployDir+"/conf/tidb-lightning.toml")); err != nil {
 			return
 		}
-		if len(stdOutMsg) != 0 {
+		if string(stdOutMsg) != "0\n" {
 			configStrictFormat = `s/^no-schema = \(\s\|\S\)\+$/no-schema = true/;s/^strict-format = \(\s\|\S\)\+$/strict-format = true/;`
 		}
+		configRegionCon := ""
+		// set region-concurrency if there is a importer exists on the same machine with a lightning
+		if _, ok := importerSet[lightningIP]; ok {
+			configRegionCon = fmt.Sprintf(`s/^table-concurrency/region-concurrency = %d\ntable-concurrency/;`, runtime.NumCPU()*3/4)
+			if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("grep 'region-concurrency' %s | wc -l", deployDir+"/conf/tidb-lightning.toml")); err != nil {
+				fmt.Println("err != nil", err, string(stdOutMsg))
+				return
+			}
+			fmt.Println(string(stdOutMsg))
+			if string(stdOutMsg) != "0\n" {
+				configRegionCon = fmt.Sprintf(`s/^region-concurrency = \(\s\|\S\)\+$/region-concurrency = %d/;`, runtime.NumCPU()*3/4)
+			}
+		}
 		sedLightningConf := `sed -i "` +
+			configRegionCon +
 			configStrictFormat +
 			`s/^backslash-escape = \(\s\|\S\)\+$/backslash-escape = false/;` +
 			`s/^delimiter = \(\s\|\S\)\+$/delimiter = \"\"/;` +
@@ -310,11 +329,9 @@ func restoreData(importerIPs []string, lightningIPs []string, deployDir string) 
 			`s/^separator = \(\s\|\S\)\+$/separator = \",\"/;` +
 			`s/^trim-last-separator = \(\s\|\S\)\+$/trim-last-separator = false/"`
 		if _, _, err = runCmd("ssh", lightningIP, fmt.Sprintf(`%s %s`, sedLightningConf, deployDir+"/conf/tidb-lightning.toml")); err != nil {
-			errCh <- err
 			return
 		}
 		if _, _, err = runCmd("ssh", lightningIP, fmt.Sprintf(`sh %s`, deployDir+"/scripts/start_lightning.sh")); err != nil {
-			errCh <- err
 			return
 		}
 		fmt.Println(lightningIP, "ok")
