@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -25,8 +26,8 @@ const (
 	nmDeployDir = "deploy-dir"
 
 	//nmAnsibleDir    = "ansible-dir"
-	nmLightningIP  = "lightning-ip"
-	nmLightningDir = "lightning-dir"
+	nmLightningIP = "lightning-ip"
+	nmDataDir     = "data-dir"
 
 	nmImporterIP = "importer-ip"
 )
@@ -45,9 +46,9 @@ var (
 	//ansibleDir = flag.String(nmAnsibleDir, "", "ansible directory path")
 
 	// TODO: If there is only one lightning, we do not need this var, we can fetch it from ansible.
-	lightningIP  = flag.String(nmLightningIP, "", "ip address of tidb-lightnings")
-	lightningDir = flag.String(nmLightningDir, "", "source data directory of mydumper")
-	importerIP   = flag.String(nmImporterIP, "", "ip address of tikv-importer")
+	lightningIP = flag.String(nmLightningIP, "", "ip address of tidb-lightnings")
+	dataDir     = flag.String(nmDataDir, "", "data source directory of lightning")
+	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
 )
 
 func main() {
@@ -60,38 +61,20 @@ func main() {
 		actualFlags[nmAll] = false
 	}
 
-	// todo: fetch ansible inventory.ini, get tidbIp tidbPort, deployDir
-	lightningIPs := strings.Split(*lightningIP, ",")
-	lightningDirs := strings.Split(*lightningDir, ",")
-	if len(lightningIPs) == 0 {
-		fmt.Println("missing lightningIP")
+	lightningIPs, dataDirs, err := getLightningIPsAndDataDirs()
+	if err != nil {
+		fmt.Println(err.Error())
 		os.Exit(1)
 	}
-	if len(lightningIPs) != len(lightningDirs) {
-		fmt.Println("the count of lightningIP can not match the count of lightningDir")
-		os.Exit(1)
-	}
-	if len(lightningIPs) > 3 {
-		lightningIPs = lightningIPs[:3]
-		lightningDirs = lightningDirs[:3]
-	}
 
-	// trim the trailing '\'
-	for i, dir := range lightningDirs {
-		if strings.LastIndex(dir, "\\") == len(dir)-1 {
-			lightningDirs[i] = string([]byte(dir)[0 : len(dir)-1])
-		}
-	}
-
-	var err error
 	if actualFlags[nmAll] || actualFlags[nmCSV] {
-		if err = fetchTpccRepoAndEnforceConf(*tidbIP, *tidbPort, *warehouse, lightningDirs, lightningIPs); err != nil {
+		if err = fetchTpccRepoAndEnforceConf(*tidbIP, *tidbPort, *warehouse, dataDirs, lightningIPs); err != nil {
 			os.Exit(1)
 		}
 		if err = genSchema(*tidbIP, *tidbPort, lightningIPs[0]); err != nil {
 			os.Exit(1)
 		}
-		if err = genCSV(lightningIPs, lightningDirs); err != nil {
+		if err = genCSV(lightningIPs, dataDirs); err != nil {
 			os.Exit(1)
 		}
 	}
@@ -115,6 +98,43 @@ func main() {
 	}
 	os.Exit(0)
 
+}
+
+func getLightningIPsAndDataDirs() (lightningIPs, dataDirs []string, err error) {
+	// todo: fetch ansible inventory.ini, get tidbIp tidbPort, deployDir
+	if len(*lightningIP) == 0 {
+		return nil, nil, errors.New("missing lightningIP")
+	}
+	lightningIPs = strings.Split(*lightningIP, ",")
+	if len(*dataDir) == 0 {
+		if len(*deployDir) == 0 {
+			return nil, nil, errors.New("missing deployDir")
+		}
+		if strings.LastIndex(*deployDir, "/") == len(*deployDir)-1 {
+			*deployDir = string([]byte(*deployDir)[0 : len(*deployDir)-1])
+		}
+		for range lightningIPs {
+			dataDirs = append(dataDirs, *deployDir+"/mydumper")
+		}
+	} else {
+		dataDirs = strings.Split(*dataDir, ",")
+		if len(lightningIPs) != len(dataDirs) {
+			return nil, nil, errors.New("the count of lightningIP can not match the count of dataDir")
+		}
+		// trim the trailing '/'
+		for i, dir := range dataDirs {
+			if strings.LastIndex(dir, "/") == len(dir)-1 {
+				dataDirs[i] = string([]byte(dir)[0 : len(dir)-1])
+			}
+		}
+	}
+
+	if len(lightningIPs) > 3 {
+		lightningIPs = lightningIPs[:3]
+		dataDirs = dataDirs[:3]
+	}
+
+	return
 }
 
 /**
