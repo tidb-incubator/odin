@@ -55,7 +55,7 @@ var (
 	dataDir     = flag.String(nmDataDir, "", "data source directory of lightning")
 	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
 
-	testDB      = flag.String(nmDB, "mmm", "test database name")
+	dbName      = flag.String(nmDB, "tpcc", "test database name")
 	goTPCBinary = flag.String(binaryURL, "https://github.com/yeya24/go-tpc/releases/download/v0.1/go-tpc", "url of the go-tpc binary to download")
 )
 
@@ -78,10 +78,10 @@ func main() {
 			os.Exit(1)
 		}
 		start2 = time.Now()
-		if err = genSchema(*tidbIP, *tidbPort, lightningIPs[0]); err != nil {
+		if err = genSchema(*tidbIP, *tidbPort, lightningIPs[0], *dbName); err != nil {
 			os.Exit(1)
 		}
-		if err = genCSV(lightningIPs, dataDirs, *warehouse, *threads); err != nil {
+		if err = genCSV(lightningIPs, dataDirs, *warehouse, *threads, *dbName); err != nil {
 			os.Exit(1)
 		}
 	}
@@ -206,16 +206,13 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string) (err error) {
 > ./runSQL.sh props.mysql sql.mysql/indexCreates.sql
 > cd -
 */
-func genSchema(tidbIP, tidbPort string, lightningIP string) (err error) {
-	//if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, *testDB)); err != nil {
-	//	return
-	//}
-	if _, _, err = runCmd("ssh", lightningIP, fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, *testDB)); err != nil {
+func genSchema(tidbIP, tidbPort, lightningIP, dbName string) (err error) {
+	if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, dbName)); err != nil {
 		return
 	}
 	var stdOutMsg []byte
 	// Create schema, including database and table.
-	if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc schema -u root -H %s -P %s -D %s", tidbIP, tidbPort, *testDB)); err != nil {
+	if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc schema -u root -H %s -P %s -D %s", tidbIP, tidbPort, dbName)); err != nil {
 		return
 	}
 	fmt.Printf("%s", stdOutMsg)
@@ -226,7 +223,7 @@ func genSchema(tidbIP, tidbPort string, lightningIP string) (err error) {
 > cd /tmp/benchmarksql/run
 > ./runLoader.sh props.mysql props.mysql
 */
-func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads int64) (err error) {
+func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads int64, dbName string) (err error) {
 	var specifiedTables []string
 	switch len(lightningIPs) {
 	case 1:
@@ -236,6 +233,7 @@ func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads in
 		specifiedTables = []string{"--csv.tables stock", "--csv.tables orders"}
 	case 3:
 		specifiedTables = []string{"--csv.tables customer", "--csv.tables stock", "--csv.tables orders"}
+		// TODO(yeya24): What about len > 3?
 	}
 
 	errCh := make(chan error, 3)
@@ -254,7 +252,7 @@ func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads in
 		go func() {
 			defer wg.Done()
 			if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", ip, fmt.Sprintf("cd %s; rm -rf *; "+
-				"/tmp/go-tpc tpcc prepare -T %d --warehouses %d --csv.output %s %s", dir, threads, warehouse, dir, table)); err != nil {
+				"/tmp/go-tpc tpcc prepare -D %s -T %d --warehouses %d --csv.output %s %s", dir, dbName, threads, warehouse, dir, table)); err != nil {
 				if err != nil {
 					errCh <- err
 					return
