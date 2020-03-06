@@ -21,6 +21,7 @@ const (
 	nmRestore = "restore"
 
 	nmWarehouse = "warehouse"
+	nmThreads   = "threads"
 
 	nmTiDBIP    = "tidb-ip"
 	nmTiDBPort  = "tidb-port"
@@ -31,6 +32,8 @@ const (
 	nmDataDir     = "data-dir"
 
 	nmImporterIP = "importer-ip"
+	nmDB         = "db"
+	binaryURL    = "binary-url"
 )
 
 var (
@@ -42,7 +45,8 @@ var (
 	tidbPort  = flag.String(nmTiDBPort, "4000", "port of tidb-server")
 	deployDir = flag.String(nmDeployDir, "", "directory path of cluster deployment")
 
-	warehouse = flag.Int64(nmWarehouse, 100, "count of warehouse")
+	warehouse = flag.Int64(nmWarehouse, 100, "number of warehouses")
+	threads   = flag.Int64(nmThreads, 40, "number of threads")
 
 	//ansibleDir = flag.String(nmAnsibleDir, "", "ansible directory path")
 
@@ -50,6 +54,9 @@ var (
 	lightningIP = flag.String(nmLightningIP, "", "ip address of tidb-lightnings")
 	dataDir     = flag.String(nmDataDir, "", "data source directory of lightning")
 	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
+
+	testDB      = flag.String(nmDB, "mmm", "test database name")
+	goTPCBinary = flag.String(binaryURL, "https://github.com/yeya24/go-tpc/releases/download/v0.1/go-tpc", "url of the go-tpc binary to download")
 )
 
 func main() {
@@ -67,14 +74,14 @@ func main() {
 
 	var start2 time.Time
 	if *all || *csv {
-		if err = fetchTpccRepoAndEnforceConf(*tidbIP, *tidbPort, *warehouse, dataDirs, lightningIPs); err != nil {
+		if err = fetchTpcc(dataDirs, lightningIPs); err != nil {
 			os.Exit(1)
 		}
 		start2 = time.Now()
 		if err = genSchema(*tidbIP, *tidbPort, lightningIPs[0]); err != nil {
 			os.Exit(1)
 		}
-		if err = genCSV(lightningIPs, dataDirs); err != nil {
+		if err = genCSV(lightningIPs, dataDirs, *warehouse, *threads); err != nil {
 			os.Exit(1)
 		}
 	}
@@ -153,53 +160,25 @@ func getLightningIPsAndDataDirs() (lightningIPs, dataDirs []string, err error) {
 > echo fileLocation=%s >> /tmp/benchmarksql/run/props.mysql
 > echo tableName=%s >> /tmp/benchmarksql/run/props.mysql
 */
-func fetchTpccRepoAndEnforceConf(tidbIP, tidbPort string, warehouse int64, lightningDirs []string, lightningIPs []string) (err error) {
-	var tableName []string
-	switch len(lightningIPs) {
-	case 1:
-		tableName = []string{"all"}
-	case 2:
-		tableName = []string{"customer", "stock,order"}
-	case 3:
-		tableName = []string{"customer", "stock", "order"}
-	}
-
+func fetchTpcc(lightningDirs []string, lightningIPs []string) (err error) {
 	errCh := make(chan error, 3)
 	wg := &sync.WaitGroup{}
 	for i, lightningIP := range lightningIPs {
-		tn := tableName[i]
 		ip := lightningIP
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err = runCmd("ssh", ip, `rm -rf /tmp/benchmarksql`); err != nil {
+			if _, _, err = runCmd("ssh", ip, `rm -f /tmp/go-tpc`); err != nil {
 				errCh <- err
 				return
 			}
-			if _, _, err = runCmd("ssh", ip, `cd /tmp; git clone -b specify_table https://github.com/XuHuaiyu/benchmarksql.git`); err != nil {
+			// TODO(yeya24): This is just a tmp release to download the binary.
+			// Change it when the binary can be directly download in the main repo.
+			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("wget -O /tmp/go-tpc %s; chmod +x /tmp/go-tpc", *goTPCBinary)); err != nil {
 				errCh <- err
 				return
 			}
-			if _, _, err = runCmd("ssh", ip, `sudo yum install -y java ant`); err != nil {
-				errCh <- err
-				return
-			}
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf(`cd /tmp/benchmarksql; ant`)); err != nil {
-				errCh <- err
-				return
-			}
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf(`sed -i '%s' %s`, fmt.Sprintf(`s/localhost:4000/%s/;s/warehouses=[0-9]\+/%s/;s/loadWorkers=[0-9]\+/loadWorkers=%d/`, tidbIP+":"+tidbPort, fmt.Sprintf("warehouses=%d", warehouse), runtime.NumCPU()), "/tmp/benchmarksql/run/props.mysql")); err != nil {
-				errCh <- err
-				return
-			}
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("echo fileLocation=%s/tpcc. >> /tmp/benchmarksql/run/props.mysql", lightningDirs[i])); err != nil {
-				errCh <- err
-				return
-			}
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("echo tableName=%s >> /tmp/benchmarksql/run/props.mysql", tn)); err != nil {
-				errCh <- err
-				return
-			}
+			fmt.Println("Download go-tpc binary successfully!")
 			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", lightningDirs[i])); err != nil {
 				errCh <- err
 				return
@@ -228,14 +207,15 @@ func fetchTpccRepoAndEnforceConf(tidbIP, tidbPort string, warehouse int64, light
 > cd -
 */
 func genSchema(tidbIP, tidbPort string, lightningIP string) (err error) {
-	if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists tpcc"`, tidbIP, tidbPort)); err != nil {
-		return
-	}
-	if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "create database tpcc"`, tidbIP, tidbPort)); err != nil {
+	//if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, *testDB)); err != nil {
+	//	return
+	//}
+	if _, _, err = runCmd("ssh", lightningIP, fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, *testDB)); err != nil {
 		return
 	}
 	var stdOutMsg []byte
-	if stdOutMsg, _, err = runCmd("ssh", lightningIP, "cd /tmp/benchmarksql/run; ./runSQL.sh props.mysql sql.mysql/tableCreates.sql; ./runSQL.sh props.mysql sql.mysql/indexCreates.sql"); err != nil {
+	// Create schema, including database and table.
+	if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc schema -u root -H %s -P %s -D %s", tidbIP, tidbPort, *testDB)); err != nil {
 		return
 	}
 	fmt.Printf("%s", stdOutMsg)
@@ -246,12 +226,24 @@ func genSchema(tidbIP, tidbPort string, lightningIP string) (err error) {
 > cd /tmp/benchmarksql/run
 > ./runLoader.sh props.mysql props.mysql
 */
-func genCSV(lightningIPs []string, lightningDirs []string) (err error) {
+func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads int64) (err error) {
+	var specifiedTables []string
+	switch len(lightningIPs) {
+	case 1:
+		// empty means generating all tables
+		specifiedTables = []string{""}
+	case 2:
+		specifiedTables = []string{"--csv.tables stock", "--csv.tables orders"}
+	case 3:
+		specifiedTables = []string{"--csv.tables customer", "--csv.tables stock", "--csv.tables orders"}
+	}
+
 	errCh := make(chan error, 3)
 	wg := &sync.WaitGroup{}
 	for i, lightningIP := range lightningIPs {
 		ip := lightningIP
 		dir := lightningDirs[i]
+		table := specifiedTables[i]
 		wg.Add(1)
 		stdOutMsg := make(chan string, 40)
 		go func() {
@@ -261,7 +253,8 @@ func genCSV(lightningIPs []string, lightningDirs []string) (err error) {
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", ip, fmt.Sprintf("cd %s; rm -rf *; cd /tmp/benchmarksql/run; ./runLoader.sh props.mysql props.mysql", dir)); err != nil {
+			if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", ip, fmt.Sprintf("cd %s; rm -rf *; "+
+				"/tmp/go-tpc tpcc prepare -T %d --warehouses %d --csv.output %s %s", dir, threads, warehouse, dir, table)); err != nil {
 				if err != nil {
 					errCh <- err
 					return
