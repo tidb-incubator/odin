@@ -76,7 +76,7 @@ func main() {
 
 	var start2 time.Time
 	if *all || *csv {
-		if err = fetchTpcc(dataDirs, lightningIPs, *skipDownloading); err != nil {
+		if err = fetchTpcc(dataDirs, lightningIPs, *goTPCBinary, *skipDownloading); err != nil {
 			os.Exit(1)
 		}
 		start2 = time.Now()
@@ -152,17 +152,10 @@ func getLightningIPsAndDataDirs() (lightningIPs, dataDirs []string, err error) {
 }
 
 /**
-> rm -rf /tmp/benchmarksql
-> git clone https://github.com/pingcap/benchmarksql.git /tmp/benchmarksql
-> yum install -y java ant
-> cd /tmp/benchmarksql
-> ant
-> sed -i 's/localhost:4000/tidb_ip:tidb_port' /tmp/benchmarksql/run/props.mysql
-> sed -i "s/warehouses=[0-9]\+/warehouses=10000/" /tmp/benchmarksql/run/props.mysql
-> echo fileLocation=%s >> /tmp/benchmarksql/run/props.mysql
-> echo tableName=%s >> /tmp/benchmarksql/run/props.mysql
+> rm -f /tmp/go-tpc
+> wget -O /tmp/go-tpc binary_url; chmod +x /tmp/go-tpc
 */
-func fetchTpcc(lightningDirs []string, lightningIPs []string, skipDownloading bool) (err error) {
+func fetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, skipDownloading bool) (err error) {
 	errCh := make(chan error, 3)
 	wg := &sync.WaitGroup{}
 	for i, lightningIP := range lightningIPs {
@@ -170,14 +163,15 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string, skipDownloading bo
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err = runCmd("ssh", ip, `rm -f /tmp/go-tpc`); err != nil {
-				errCh <- err
-				return
-			}
 			if !skipDownloading {
+				if _, _, err = runCmd("ssh", ip, `rm -f /tmp/go-tpc`); err != nil {
+					errCh <- err
+					return
+				}
+
 				// TODO(yeya24): This is just a tmp release to download the binary.
 				// Change it when the binary can be directly download in the main repo.
-				if _, _, err = runCmd("ssh", ip, fmt.Sprintf("wget -O /tmp/go-tpc %s; chmod +x /tmp/go-tpc", *goTPCBinary)); err != nil {
+				if _, _, err = runCmd("ssh", ip, fmt.Sprintf("wget -O /tmp/go-tpc %s; chmod +x /tmp/go-tpc", binaryURL)); err != nil {
 					errCh <- err
 					return
 				}
@@ -203,12 +197,8 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string, skipDownloading bo
 }
 
 /**
-> mysql -h tidbIP -u root -P tidbPort -e "drop database if exists tpcc"
-> mysql -h tidbIP -u root -P tidbPort -e "create database tpcc"`
-> cd /tmp/benchmarksql/run
-> ./runSQL.sh props.mysql sql.mysql/tableCreates.sql
-> ./runSQL.sh props.mysql sql.mysql/indexCreates.sql
-> cd -
+> mysql -h tidbIP -u root -P tidbPort -e "drop database if exists dbName"
+> /tmp/go-tpc tpcc schema -U root -H tidbIP -P tidbPort -D dbName
 */
 func genSchema(tidbIP, tidbPort, lightningIP, dbName string) (err error) {
 	if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, dbName)); err != nil {
@@ -225,7 +215,7 @@ func genSchema(tidbIP, tidbPort, lightningIP, dbName string) (err error) {
 
 /**
 > cd /tmp/benchmarksql/run
-> ./runLoader.sh props.mysql props.mysql
+> /tmp/go-tpc tpcc prepare -D dbName -T threadsNum --warehouses warehouseNum --csv.output outputDir --csv.tables [tables]
 */
 func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads int64, dbName string) (err error) {
 	var specifiedTables []string
@@ -234,7 +224,7 @@ func genCSV(lightningIPs []string, lightningDirs []string, warehouse, threads in
 		// empty means generating all tables
 		specifiedTables = []string{""}
 	case 2:
-		specifiedTables = []string{"--csv.tables stock", "--csv.tables orders"}
+		specifiedTables = []string{"--csv.tables customer", "--csv.tables stock,orders"}
 	case 3:
 		specifiedTables = []string{"--csv.tables customer", "--csv.tables stock", "--csv.tables orders"}
 		// TODO(yeya24): What about len > 3?
