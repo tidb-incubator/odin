@@ -34,6 +34,7 @@ const (
 	nmImporterIP = "importer-ip"
 	nmDB         = "db"
 	binaryURL    = "binary-url"
+	skipDownload = "skip-download"
 )
 
 var (
@@ -55,8 +56,9 @@ var (
 	dataDir     = flag.String(nmDataDir, "", "data source directory of lightning")
 	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
 
-	dbName      = flag.String(nmDB, "tpcc", "test database name")
-	goTPCBinary = flag.String(binaryURL, "https://github.com/yeya24/go-tpc/releases/download/v0.1/go-tpc", "url of the go-tpc binary to download")
+	dbName          = flag.String(nmDB, "tpcc", "test database name")
+	goTPCBinary     = flag.String(binaryURL, "https://github.com/yeya24/go-tpc/releases/download/v0.1/go-tpc", "url of the go-tpc binary to download")
+	skipDownloading = flag.Bool(skipDownload, false, "skip downloading the go-tpc binary")
 )
 
 func main() {
@@ -74,7 +76,7 @@ func main() {
 
 	var start2 time.Time
 	if *all || *csv {
-		if err = fetchTpcc(dataDirs, lightningIPs); err != nil {
+		if err = fetchTpcc(dataDirs, lightningIPs, *skipDownloading); err != nil {
 			os.Exit(1)
 		}
 		start2 = time.Now()
@@ -160,7 +162,7 @@ func getLightningIPsAndDataDirs() (lightningIPs, dataDirs []string, err error) {
 > echo fileLocation=%s >> /tmp/benchmarksql/run/props.mysql
 > echo tableName=%s >> /tmp/benchmarksql/run/props.mysql
 */
-func fetchTpcc(lightningDirs []string, lightningIPs []string) (err error) {
+func fetchTpcc(lightningDirs []string, lightningIPs []string, skipDownloading bool) (err error) {
 	errCh := make(chan error, 3)
 	wg := &sync.WaitGroup{}
 	for i, lightningIP := range lightningIPs {
@@ -172,13 +174,15 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string) (err error) {
 				errCh <- err
 				return
 			}
-			// TODO(yeya24): This is just a tmp release to download the binary.
-			// Change it when the binary can be directly download in the main repo.
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("wget -O /tmp/go-tpc %s; chmod +x /tmp/go-tpc", *goTPCBinary)); err != nil {
-				errCh <- err
-				return
+			if !skipDownloading {
+				// TODO(yeya24): This is just a tmp release to download the binary.
+				// Change it when the binary can be directly download in the main repo.
+				if _, _, err = runCmd("ssh", ip, fmt.Sprintf("wget -O /tmp/go-tpc %s; chmod +x /tmp/go-tpc", *goTPCBinary)); err != nil {
+					errCh <- err
+					return
+				}
+				fmt.Println("Download go-tpc binary successfully!")
 			}
-			fmt.Println("Download go-tpc binary successfully!")
 			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", lightningDirs[i])); err != nil {
 				errCh <- err
 				return
