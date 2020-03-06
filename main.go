@@ -212,7 +212,7 @@ func genSchema(tidbIP, tidbPort, lightningIP, dbName string) (err error) {
 	}
 	var stdOutMsg []byte
 	// Create schema, including database and table.
-	if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc schema -u root -H %s -P %s -D %s", tidbIP, tidbPort, dbName)); err != nil {
+	if stdOutMsg, _, err = runCmd("ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc schema -U root -H %s -P %s -D %s", tidbIP, tidbPort, dbName)); err != nil {
 		return
 	}
 	fmt.Printf("%s", stdOutMsg)
