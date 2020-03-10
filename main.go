@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	all     = flag.Bool(nmAll, true, "do all the actions")
+	all     = flag.Bool(nmAll, true, "do all the actions, test is not included")
 	csv     = flag.Bool(nmCSV, false, "generate tpcc csv files")
 	test    = flag.Bool(nmTest, false, "run tpcc test")
 	restore = flag.Bool(nmRestore, false, "start lightning, importer and restore files")
@@ -82,17 +82,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// If test flag is enabled, just run tpcc test.
 	if *test {
-		var checkTime time.Time
+		var testStart time.Time
 		if err = runTPCCTest(lightningIPs[0], *tidbIP, *tidbPort, *dbName, *warehouse, *threads); err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-		fmt.Println("tpcc test finished successfully!")
-		fmt.Println("prepare cost:", time.Since(start).String(), "test cost:", time.Since(checkTime).String())
+		fmt.Println("prepare cost:", time.Since(start).String(), "test cost:", time.Since(testStart).String())
 		os.Exit(0)
 	}
-
 
 	if *all || *csv {
 		if err = dropDB(*tidbIP, *tidbPort, *dbName); err != nil {
@@ -331,13 +330,33 @@ func restoreData(importerIPs []string, lightningIPs []string, deployDir string) 
 }
 
 func runTPCCTest(lightningIP, tidbIP, tidbPort, dbName string, warehouse, threads int64) (err error) {
+	errCh := make(chan error, 1)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	stdOutMsg := make(chan string, 40)
-	if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+	go func() {
+		for line := range stdOutMsg {
+			fmt.Println(line)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+			return
+		}
+		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+			return
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+	for err = range errCh {
 		return
 	}
-	if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
-		return
-	}
+
+	fmt.Println("#============\ntpcc test finished\n#============")
 	return
 }
 
