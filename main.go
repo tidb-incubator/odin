@@ -76,21 +76,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	if  *test {
+	var start2 time.Time
+	start2 = time.Now()
+	if err = fetchTpcc(dataDirs, lightningIPs, *goTPCFile, *skipDownloading); err != nil {
+		os.Exit(1)
+	}
+
+	if *test {
+		var checkTime time.Time
 		if err = runTPCCTest(lightningIPs[0], *tidbIP, *tidbPort, *dbName, *warehouse, *threads); err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
 		fmt.Println("tpcc test finished successfully!")
+		fmt.Println("prepare cost:", time.Since(start).String(), "test cost:", time.Since(checkTime).String())
 		os.Exit(0)
 	}
 
-	var start2 time.Time
+
 	if *all || *csv {
-		if err = fetchTpcc(dataDirs, lightningIPs, *goTPCFile, *skipDownloading); err != nil {
-			os.Exit(1)
-		}
-		start2 = time.Now()
 		if err = dropDB(*tidbIP, *tidbPort, *dbName); err != nil {
 			os.Exit(1)
 		}
