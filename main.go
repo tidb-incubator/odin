@@ -49,7 +49,7 @@ var (
 	deployDir = flag.String(nmDeployDir, "", "directory path of cluster deployment")
 
 	warehouse = flag.Int64(nmWarehouse, 100, "number of warehouses")
-	threads   = flag.Int64(nmThreads, 40, "number of threads")
+	threads   = flag.Int64(nmThreads, 40, "number of threads of go-tpc")
 
 	//ansibleDir = flag.String(nmAnsibleDir, "", "ansible directory path")
 
@@ -170,12 +170,11 @@ func getLightningIPsAndDataDirs() (lightningIPs, dataDirs []string, err error) {
 > wget -O /tmp/go-tpc binary_url; chmod +x /tmp/go-tpc
 */
 func fetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, skipDownloading bool) (err error) {
-	errCh := make(chan error, 3)
+	errCh := make(chan error, len(lightningIPs)*10) // 3 should enough, echo run 3 cmd at most
 	wg := &sync.WaitGroup{}
-	for i, lightningIP := range lightningIPs {
-		ip := lightningIP
+	for i := 0; i < len(lightningIPs); i++ {
 		wg.Add(1)
-		go func() {
+		go func(ip string, dir string) {
 			defer wg.Done()
 			if !skipDownloading {
 				if _, _, err = runCmd("ssh", ip, `rm -f /tmp/go-tpc`); err != nil {
@@ -189,16 +188,18 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, 
 				}
 				fmt.Println("Download go-tpc binary successfully!")
 			}
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", lightningDirs[i])); err != nil {
+			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", dir)); err != nil {
 				errCh <- err
 				return
 			}
-		}()
+		}(lightningIPs[i], lightningDirs[i])
 	}
+
 	go func() {
 		wg.Wait()
 		close(errCh)
 	}()
+
 	for err = range errCh {
 		if err != nil {
 			return
