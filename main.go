@@ -59,7 +59,7 @@ var (
 	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
 
 	dbName          = flag.String(nmDB, "tpcc", "test database name")
-	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.0/go-tpc_1.0.0_linux_amd64.tar.gz", "url of the go-tpc binary to download")
+	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.1/go-tpc_1.0.1_linux_amd64.tar.gz", "url of the go-tpc binary to download")
 	skipDownloading = flag.Bool(skipDownload, false, "skip downloading the go-tpc binary")
 )
 
@@ -84,7 +84,7 @@ func main() {
 
 	// If test flag is enabled, just run tpcc test.
 	if *test {
-		var testStart time.Time
+		testStart := time.Now()
 		if err = runTPCCTest(lightningIPs[0], *tidbIP, *tidbPort, *dbName, *warehouse, *threads); err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
@@ -242,6 +242,7 @@ func genCSV(lightningIPs []string, lightningDirs []string, tidbIP, tidbPort, dbN
 		tables := specifiedTables[i]
 		wg.Add(1)
 		stdOutMsg := make(chan string, 40)
+		defer close(stdOutMsg)
 		go func() {
 			for line := range stdOutMsg {
 				fmt.Println(line)
@@ -335,6 +336,7 @@ func runTPCCTest(lightningIP, tidbIP, tidbPort, dbName string, warehouse, thread
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	stdOutMsg := make(chan string, 40)
+	defer close(stdOutMsg)
 	go func() {
 		for line := range stdOutMsg {
 			fmt.Println(line)
@@ -346,6 +348,9 @@ func runTPCCTest(lightningIP, tidbIP, tidbPort, dbName string, warehouse, thread
 			return
 		}
 		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+			return
+		}
+		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
 			return
 		}
 	}()
@@ -396,7 +401,6 @@ func runCmd(name string, arg ...string) (stdOutBytes []byte, stdErrBytes []byte,
 }
 
 func runCmdAndGetStdOutInTime(stdOutMsg chan string, name string, arg ...string) (stdErrBytes []byte, err error) {
-	defer close(stdOutMsg)
 	if _, err = exec.LookPath(name); err != nil {
 		fmt.Printf("%s %s\n%s", name, strings.Join(arg, " "), err.Error())
 		return
