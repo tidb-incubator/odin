@@ -84,7 +84,7 @@ func main() {
 
 	// If test flag is enabled, just run tpcc test.
 	if *test {
-		var testStart time.Time
+		testStart := time.Now()
 		if err = runTPCCTest(lightningIPs[0], *tidbIP, *tidbPort, *dbName, *warehouse, *threads); err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
