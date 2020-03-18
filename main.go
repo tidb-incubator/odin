@@ -242,6 +242,7 @@ func genCSV(lightningIPs []string, lightningDirs []string, tidbIP, tidbPort, dbN
 		tables := specifiedTables[i]
 		wg.Add(1)
 		stdOutMsg := make(chan string, 40)
+		defer close(stdOutMsg)
 		go func() {
 			for line := range stdOutMsg {
 				fmt.Println(line)
@@ -335,6 +336,7 @@ func runTPCCTest(lightningIP, tidbIP, tidbPort, dbName string, warehouse, thread
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	stdOutMsg := make(chan string, 40)
+	defer close(stdOutMsg)
 	go func() {
 		for line := range stdOutMsg {
 			fmt.Println(line)
@@ -396,7 +398,6 @@ func runCmd(name string, arg ...string) (stdOutBytes []byte, stdErrBytes []byte,
 }
 
 func runCmdAndGetStdOutInTime(stdOutMsg chan string, name string, arg ...string) (stdErrBytes []byte, err error) {
-	defer close(stdOutMsg)
 	if _, err = exec.LookPath(name); err != nil {
 		fmt.Printf("%s %s\n%s", name, strings.Join(arg, " "), err.Error())
 		return
