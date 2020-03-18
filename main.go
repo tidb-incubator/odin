@@ -229,9 +229,9 @@ func genCSV(lightningIPs []string, lightningDirs []string, tidbIP, tidbPort, dbN
 		// empty means generating all tables
 		specifiedTables = []string{""}
 	case 2:
-		specifiedTables = []string{"--tables stock", "--tables order_line,customer,config,district,history,item,new_order,orders,warehouse"}
+		specifiedTables = []string{"--tables stock", "--tables order_line,customer,district,history,item,new_order,orders,warehouse"}
 	case 3:
-		specifiedTables = []string{"--tables stock", "--tables orders,order_line", "--tables customer,config,district,history,item,new_order,warehouse"}
+		specifiedTables = []string{"--tables stock", "--tables orders,order_line", "--tables customer,district,history,item,new_order,warehouse"}
 	}
 
 	errCh := make(chan error, 3)
