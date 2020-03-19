@@ -59,7 +59,7 @@ var (
 	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
 
 	dbName          = flag.String(nmDB, "tpcc", "test database name")
-	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.1/go-tpc_1.0.1_linux_amd64.tar.gz", "url of the go-tpc binary to download")
+	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.2/go-tpc_1.0.2_linux_amd64.tar.gz", "url of the go-tpc binary to download")
 	skipDownloading = flag.Bool(skipDownload, false, "skip downloading the go-tpc binary")
 )
 
