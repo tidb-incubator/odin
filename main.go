@@ -36,6 +36,8 @@ const (
 	nmDB         = "db"
 	downloadURL  = "download-url"
 	skipDownload = "skip-download"
+
+	nmtime = "time"
 )
 
 var (
@@ -61,6 +63,8 @@ var (
 	dbName          = flag.String(nmDB, "tpcc", "test database name")
 	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.2/go-tpc_1.0.2_linux_amd64.tar.gz", "url of the go-tpc binary to download")
 	skipDownloading = flag.Bool(skipDownload, false, "skip downloading the go-tpc binary")
+
+	tpcruntime = flag.String(nmtime, "1h", "tpc run time")
 )
 
 func main() {
@@ -347,7 +351,7 @@ func runTPCCTest(lightningIP, tidbIP, tidbPort, dbName string, warehouse, thread
 		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
 			return
 		}
-		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run --time %s -U root -H %s -P %s -D %s -T %d --warehouses %d", *tpcruntime, tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
 			return
 		}
 		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %s -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
