@@ -107,8 +107,12 @@ func main() {
 		if err = genCSV(lightningIPs, dataDirs, *tidbIP, *tidbPort, *dbName, *warehouse, *threads); err != nil {
 			os.Exit(1)
 		}
+
+		fmt.Println("prepare cost:", time.Since(start).String(), "gen data cost:", time.Since(start2).String())
+		if !*all {
+			os.Exit(0)
+		}
 	}
-	fmt.Println("prepare cost:", time.Since(start).String(), "gen data cost:", time.Since(start2).String())
 
 	if len(*importerIP) == 0 {
 		fmt.Println("missing importerIP")
