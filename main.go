@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -213,14 +216,21 @@ func fetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, 
 	return
 }
 
-/**
-> mysql -h tidbIP -u root -P tidbPort -e "drop database if exists dbName"
-*/
-func dropDB(tidbIP, tidbPort, dbName string) (err error) {
-	if _, _, err = runCmd("bash", "-c", fmt.Sprintf(`mysql -h %s -u root -P %s -e "drop database if exists %s"`, tidbIP, tidbPort, dbName)); err != nil {
+// dropDB drop the database if exists.
+func dropDB(host string, port string, dbName string) (err error) {
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/", "root", "", host, port)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
 		return
 	}
-	return
+
+	_, err = db.Exec("drop database if exists " + dbName)
+	if err != nil {
+		return
+	}
+
+	return nil
 }
 
 /**
