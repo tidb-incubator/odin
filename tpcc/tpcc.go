@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,58 +16,6 @@ import (
 	// for mysql
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/sync/errgroup"
-)
-
-const (
-	nmAll     = "all"
-	nmCSV     = "csv"
-	nmTest    = "test"
-	nmRestore = "restore"
-
-	nmWarehouse = "warehouse"
-	nmThreads   = "threads"
-
-	nmTiDBIP    = "tidb-ip"
-	nmTiDBPort  = "tidb-port"
-	nmDeployDir = "deploy-dir"
-
-	//nmAnsibleDir    = "ansible-dir"
-	nmLightningIP = "lightning-ip"
-	nmDataDir     = "data-dir"
-
-	nmImporterIP = "importer-ip"
-	nmDB         = "db"
-	downloadURL  = "download-url"
-	skipDownload = "skip-download"
-
-	nmtime = "time"
-)
-
-var (
-	all     = flag.Bool(nmAll, true, "do all the actions, test is not included")
-	csv     = flag.Bool(nmCSV, false, "generate tpcc csv files")
-	test    = flag.Bool(nmTest, false, "run tpcc test")
-	restore = flag.Bool(nmRestore, false, "start lightning, importer and restore files")
-
-	tidbIP    = flag.String(nmTiDBIP, "127.0.0.1", "ip of tidb-server")
-	tidbPort  = flag.String(nmTiDBPort, "4000", "port of tidb-server")
-	deployDir = flag.String(nmDeployDir, "", "directory path of cluster deployment")
-
-	warehouse = flag.Int64(nmWarehouse, 100, "number of warehouses")
-	threads   = flag.Int64(nmThreads, 40, "number of threads of go-tpc")
-
-	//ansibleDir = flag.String(nmAnsibleDir, "", "ansible directory path")
-
-	// TODO: If there is only one lightning, we do not need this var, we can fetch it from ansible.
-	lightningIP = flag.String(nmLightningIP, "", "ip address of tidb-lightnings")
-	dataDir     = flag.String(nmDataDir, "", "data source directory of lightning")
-	importerIP  = flag.String(nmImporterIP, "", "ip address of tikv-importer")
-
-	dbName          = flag.String(nmDB, "tpcc", "test database name")
-	goTPCFile       = flag.String(downloadURL, "https://github.com/pingcap/go-tpc/releases/download/v1.0.2/go-tpc_1.0.2_linux_amd64.tar.gz", "url of the go-tpc binary to download")
-	skipDownloading = flag.Bool(skipDownload, false, "skip downloading the go-tpc binary")
-
-	tpcruntime = flag.String(nmtime, "1h", "tpc run time")
 )
 
 // SetDataDirs Set dataDirs as deployDir/mydumper default if it's not setted.
@@ -102,12 +49,11 @@ func SetDataDirs(deployDir string, lightningIPs []string, dataDirs []string) (re
 > rm -f /tmp/go-tpc
 > wget -O /tmp/go-tpc binary_url; chmod +x /tmp/go-tpc
 */
-func FetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, skipDownloading bool) (err error) {
+func FetchTpcc(lightningIPs []string, binaryURL string, skipDownloading bool) (err error) {
 	errg, _ := errgroup.WithContext(context.Background())
 
 	for i := 0; i < len(lightningIPs); i++ {
 		ip := lightningIPs[i]
-		dir := lightningDirs[i]
 
 		errg.Go(func() error {
 			if !skipDownloading {
@@ -119,10 +65,6 @@ func FetchTpcc(lightningDirs []string, lightningIPs []string, binaryURL string, 
 					return err
 				}
 				fmt.Println("Download go-tpc binary successfully!")
-			}
-
-			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", dir)); err != nil {
-				return err
 			}
 
 			return nil
@@ -164,7 +106,7 @@ func GenCSV(lightningIPs []string, lightningDirs []string, tidbIP string, tidbPo
 		specifiedTables = []string{"--tables stock", "--tables orders,order_line", "--tables customer,district,history,item,new_order,warehouse"}
 	}
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, len(lightningIPs)*2)
 	wg := &sync.WaitGroup{}
 	for i, lightningIP := range lightningIPs {
 		ip := lightningIP
@@ -180,6 +122,11 @@ func GenCSV(lightningIPs []string, lightningDirs []string, tidbIP string, tidbPo
 		}()
 		go func() {
 			defer wg.Done()
+			if _, _, err = runCmd("ssh", ip, fmt.Sprintf("mkdir -p %s", dir)); err != nil {
+				errCh <- err
+				return
+			}
+
 			if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", ip, fmt.Sprintf("cd %s; rm -rf *; "+
 				"/tmp/go-tpc tpcc prepare -U root -H %s -P %d -D %s -T %d --warehouses %d --output %s %s", dir, tidbIP, tidbPort, dbName, threads, warehouse, dir, tables)); err != nil {
 				if err != nil {
@@ -189,10 +136,12 @@ func GenCSV(lightningIPs []string, lightningDirs []string, tidbIP string, tidbPo
 			}
 		}()
 	}
+
 	go func() {
 		wg.Wait()
 		close(errCh)
 	}()
+
 	for err = range errCh {
 		return
 	}
@@ -294,7 +243,7 @@ func RestoreData(importerIPs []string, lightningIPs []string, deployDir string) 
 	return
 }
 
-func RunTPCCTest(lightningIP, tidbIP string, tidbPort int, dbName string, warehouse, threads int) (err error) {
+func RunTPCCTest(lightningIP, tidbIP string, tidbPort int, dbName string, warehouse, threads int, runTime string) (err error) {
 	errCh := make(chan error, 1)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -310,7 +259,7 @@ func RunTPCCTest(lightningIP, tidbIP string, tidbPort int, dbName string, wareho
 		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %d -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
 			return
 		}
-		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run --time %s -U root -H %s -P %d -D %s -T %d --warehouses %d", *tpcruntime, tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
+		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc run --time %s -U root -H %s -P %d -D %s -T %d --warehouses %d", runTime, tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {
 			return
 		}
 		if _, err = runCmdAndGetStdOutInTime(stdOutMsg, "ssh", lightningIP, fmt.Sprintf("/tmp/go-tpc tpcc check -U root -H %s -P %d -D %s -T %d --warehouses %d", tidbIP, tidbPort, dbName, threads, warehouse)); err != nil {

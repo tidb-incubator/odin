@@ -10,18 +10,7 @@ func newRestoreCmd() *cobra.Command {
 		Use:   "restore",
 		Short: "start lightning, importer and restore files",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var err error
-			err = tpcc.DropDB(tidbIP, tidbPort, dbName)
-			if err != nil {
-				return err
-			}
-
-			err = tpcc.FetchTpcc(dataDirs, lightningIPs, downloadURL, skipDownload)
-			if err != nil {
-				return err
-			}
-
-			err = tpcc.RestoreData(importerIPs, lightningIPs, deployDir)
+			err := tpcc.RestoreData(importerIPs, lightningIPs, deployDir)
 			if err != nil {
 				return err
 			}
@@ -32,7 +21,7 @@ func newRestoreCmd() *cobra.Command {
 
 	setFlag(cmd)
 
-	cmd.MarkFlagRequired("deploy-dir")
+	_ = cmd.MarkFlagRequired("deploy-dir")
 
 	return cmd
 }

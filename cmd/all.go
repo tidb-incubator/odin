@@ -17,12 +17,12 @@ func newAllCmd() *cobra.Command {
 				return err
 			}
 
-			err = tpcc.DropDB(tidbIP, tidbPort, dbName)
+			err = tpcc.FetchTpcc(lightningIPs, downloadURL, skipDownload)
 			if err != nil {
 				return err
 			}
 
-			err = tpcc.FetchTpcc(dataDirs, lightningIPs, downloadURL, skipDownload)
+			err = tpcc.DropDB(tidbIP, tidbPort, dbName)
 			if err != nil {
 				return err
 			}
