@@ -5,61 +5,47 @@ A command line utility to generate/import/test via [go-tpc](https://github.com/p
 ## Install
 
 ```bash
-go build -o tpccgen main.go
-```
-
-## Flags
-
-```bash
-Usage of ./tpccgen:
-  -all
-        do all the actions (default true)
-  -csv
-        generate tpcc csv files
-  -data-dir string
-        data source directory of lightning
-  -db string
-        test database name (default "tpcc")
-  -deploy-dir string
-        directory path of cluster deployment
-  -download-url string
-        url of the go-tpc binary to download (default "https://github.com/pingcap/go-tpc/releases/download/v1.0.0/go-tpc_1.0.0_linux_amd64.tar.gz")
-  -importer-ip string
-        ip address of tikv-importer
-  -lightning-ip string
-        ip address of tidb-lightnings
-  -restore
-        start lightning, importer and restore files
-  -skip-download
-        skip downloading the go-tpc binary
-  -test
-        run tpcc test
-  -threads int
-        number of threads (default 40)
-  -tidb-ip string
-        ip of tidb-server (default "127.0.0.1")
-  -tidb-port string
-        port of tidb-server (default "4000")
-  -warehouse int
-        number of warehouses (default 100)
+go build
 ```
 
 ## Usage
+```
+Usage:
+  tpccgen [flags]
+  tpccgen [command]
 
-By default, tpccgen will automatically take 3 actions:
+Available Commands:
+  all         Generate TPC-C CSV files and restore files by start import & lightning
+  csv         Generate TPC-C CSV files
+  restore     Restore files by start importer & lightning
+  test        Run TPC-C test
+  help        Help about any command
 
-1. download [go-tpc](https://github.com/pingcap/go-tpc) binary
-2. generate csv data
-3. import csv data through [tidb-lightning](https://github.com/pingcap/tidb-lightning)
+Flags:
+  -h, --help   help for tpccgen
 
-You can also add some flags you want. For example:
-
-```bash
-./tpccgen --lightning-ip 172.16.5.90 --importer-ip 172.16.5.89 --data-dir /data/lightning --tidb-ip 172.16.5.84 --tidb-port 4111 --deploy-dir /data/deploy --db test --threads 40 --warehouse 10
+Use "tpccgen [command] --help" for more information about a command.
 ```
 
-If you want to perform tpcc test, you must add `--test` flag just like the command below:
+## Example
 
-```bash
-./tpccgen --test --lightning-ip 172.16.5.90 --tidb-ip 172.16.5.84 --tidb-port 4111 --db test --threads 40 --warehouse 10
+After deploying TiDB Lightning use the flowing command to generate CSV and restore files:
+
+```
+./tpccgen all --lightning-ip 172.16.5.70 --importer-ip 172.16.5.69 --deploy-dir /data1/deploy --db tpcc4  --warehouse 100 --tidb-ip "172.16.5.70"
+```
+
+If deploy multi TiDB Lightning:
+```shelll
+./tpccgen all --lightning-ip 172.16.5.70,172.16.5.74,172.16.5.75 --importer-ip 172.16.5.69,172.16.5.74,172.16.5.75 --deploy-dir /data1/deploy --db tpcc4  --warehouse 100 --tidb-ip "172.16.5.70"
+```
+
+Generate CSV files only:
+```
+./tpccgen csv --lightning-ip 172.16.5.70  --deploy-dir /data1/deploy --db tpcc4  --warehouse 100 --tidb-ip "172.16.5.70"
+```
+
+If the CSV has been generated, use the flowing command to start `lightning and `importer` to restart:
+```
+./tpccgen restore --lightning-ip 172.16.5.70 --importer-ip 172.16.5.69 --deploy-dir /data1/deploy
 ```
