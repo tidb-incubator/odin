@@ -28,7 +28,7 @@ func setFlag(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&tidbIP, "tidb-ip", "127.0.0.1", "ip of TiDB server")
 	cmd.Flags().IntVar(&tidbPort, "tidb-port", 4000, "port of TiDB server")
 	cmd.Flags().BoolVar(&skipDownload, "skip-download", false, "skip downloading the go-tpc binary")
-	cmd.Flags().StringVar(&downloadURL, "download-url", "https://github.com/pingcap/go-tpc/releases/download/v1.0.2/go-tpc_1.0.2_linux_amd64.tar.gz", "url of the go-tpc binary to download")
+	cmd.Flags().StringVar(&downloadURL, "download-url", "https://github.com/pingcap/go-tpc/releases/download/v1.0.3/go-tpc_1.0.3_linux_amd64.tar.gz", "url of the go-tpc binary to download")
 	cmd.Flags().IntVar(&warehouse, "warehouse", 100, "number of warehouses")
 	cmd.Flags().IntVar(&threads, "threads", 40, "number of threads of go-tpc")
 
