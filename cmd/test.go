@@ -11,7 +11,7 @@ func newTestCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "test",
-		Short: "run TPC-C test",
+		Short: "Run TPC-C test",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 

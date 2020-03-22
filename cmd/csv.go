@@ -21,8 +21,8 @@ var (
 
 func setFlag(cmd *cobra.Command) {
 	cmd.Flags().StringSliceVar(&lightningIPs, "lightning-ip", nil, "ip address of tidb-lightning")
-	cmd.Flags().StringSliceVar(&importerIPs, "importerIPs", nil, "ip address of tikv-importer")
-	cmd.Flags().StringSliceVar(&dataDirs, "data-dir", nil, "data source directory of lightning")
+	cmd.Flags().StringSliceVar(&importerIPs, "importer-ip", nil, "ip address of tikv-importer")
+	cmd.Flags().StringSliceVar(&dataDirs, "data-dir", nil, "data source directory of lightning, use {deploy-dir}/mydumper if not setted")
 	cmd.Flags().StringVar(&deployDir, "deploy-dir", "", "directory path of cluster deployment")
 	cmd.Flags().StringVar(&dbName, "db", "tpcc", "test database name")
 	cmd.Flags().StringVar(&tidbIP, "tidb-ip", "127.0.0.1", "ip of TiDB server")
@@ -38,7 +38,7 @@ func setFlag(cmd *cobra.Command) {
 func newCSVCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "csv",
-		Short: "generate TPC-C CSV files",
+		Short: "Generate TPC-C CSV files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			dataDirs, err = tpcc.SetDataDirs(deployDir, lightningIPs, dataDirs)

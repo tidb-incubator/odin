@@ -8,7 +8,7 @@ import (
 func newAllCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "all",
-		Short: "do all the actions, test is not included",
+		Short: "Generate TPC-C CSV files and restore files by start import & lightning",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 
