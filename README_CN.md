@@ -116,3 +116,42 @@ Use "tpccgen [command] --help" for more information about a command.
 ```
 ./tpccgen restore --lightning-ip 172.16.5.70 --importer-ip 172.16.5.69 --deploy-dir /data1/deploy
 ```
+
+## lightning 导入测试速度参考
+
+### 集群版本
+
+v4.0.0-beta
+
+### 硬件信息
+
+* 操作系统：CentOS Linux release 7.6.1810
+* CPU: 40  Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz
+* RAM: 188GB
+* DISK: 3.6TB NVMe
+* NETWORK: 10000Mb/s
+
+### 配置
+
+TiDB/TiKV/PD: 默认配置
+
+lightning 修改如下配置提升 Analyze 的速度：
+```toml
+[tidb]
+build-stats-concurrency = 40
+index-serial-scan-concurrency = 40
+```
+importer 修改如下配置, 避免导入后 TiKV 会再次 split region：
+
+```
+[import]
+region-split-size = "96MB"
+```
+### 导入 14K warehouse `order_line` 表耗时
+
+以下优化版指 nightly 版本对应 commit: 98bc8495f3fd2e74da20ffd623786f3839469d20
+
+- v4.0.0-beta 版本: 2h26m
+- 优化版本: 1h0m
+
+本测试只部署单套 TiDB lightning，注意 `order_line` 是 lightning 单表导入的瓶颈，如果用户有机器部署三套 TiDB lightning 位于不同物理机上，整体导入 TPC-C 全部表的速度与此相同。
